@@ -2,7 +2,9 @@
 edition = "2021"
 name = "image_scrapper"
 version = "0.1.0"
-
+exclude = ["/data","*.json","*.bin"]
+description = "a tool to scrape images from a website while skip the duplicate ones"
+license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
