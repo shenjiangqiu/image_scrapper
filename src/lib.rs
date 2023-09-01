@@ -144,8 +144,10 @@ async fn run_single_url(
         let img_src = get_img_src(element.value());
         let img_alt = element.value().attr("alt");
         let img_name = img_src.split('/').last().unwrap();
-        let img_name = img_alt.unwrap_or(img_name);
-        let img_path = img_path.join(img_name);
+        let img_name = img_alt.filter(|v| is_image_name(v)).unwrap_or(img_name);
+        let img_path = img_path.join(&img_name);
+
+
         // get the img url
         let img_url = url.join(img_src)?;
         srcs.push(img_url.to_string());
@@ -153,6 +155,7 @@ async fn run_single_url(
         let req = client.get(img_url).build()?;
         let client_c = Rc::clone(&client);
         handles.push(tokio::task::spawn_local(async move{
+            println!("downloading the img {:?}", img_path);
             let result = client_c.execute(req).await?;
             let bytes = result.bytes().await?;
             let mut file = tokio::io::BufWriter::new(tokio::fs::File::create(&img_path).await?);
@@ -168,4 +171,9 @@ async fn run_single_url(
     data.borrow_mut().topisc.insert(total_digest_string, srcs);
 
     Ok(true)
+}
+
+fn is_image_name(v: &str) -> bool {
+    let re = regex::Regex::new(r#"^.*\.(jpg|png|jpeg)$"#).unwrap();
+    re.is_match(v)
 }
