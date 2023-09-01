@@ -17,7 +17,7 @@ mod tests {
         sync::Arc,
     };
 
-    use image_scrapper::cli::Cli;
+    use image_scrapper::cli::{Cli, DownloadArgs};
     use reqwest;
     use reqwest_cookie_store::CookieStoreMutex;
 
@@ -38,7 +38,7 @@ mod tests {
         let req = client.get(url).build().unwrap();
         println!("request headers: {:?}", req.headers());
         let result = client.execute(req).await.unwrap();
-        
+
         println!("response body: {:?}", result.text().await.unwrap());
         // print the cookie
         let cookie_store = cookie_store.lock().unwrap();
@@ -57,9 +57,11 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn test_main() {
         let cli = Cli {
-            cookie_file: Some(PathBuf::from_str("./cookies_nicept.json").unwrap()),
-            url: vec!["https://www.nicept.net/fun.php".to_string()],
-            data_path:Some(PathBuf::from_str("./data_nicept.bin").unwrap()),
+            subcmd: image_scrapper::cli::SubCommands::Download(DownloadArgs {
+                cookie_file: Some(PathBuf::from_str("./cookies_nicept.json").unwrap()),
+                url: vec!["https://www.nicept.net/fun.php".to_string()],
+                data_path: Some(PathBuf::from_str("./data_nicept.bin").unwrap()),
+            }),
         };
         image_scrapper::run(cli).await.unwrap();
     }

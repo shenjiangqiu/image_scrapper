@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use cli::Cli;
+use cli::{Cli, DownloadArgs, ListArgs, FixArgs};
 use data::Data;
 use reqwest::Client;
 use reqwest_cookie_store::{CookieStore, CookieStoreRwLock};
@@ -30,8 +30,81 @@ fn parse_data(data_path: Option<&Path>) -> eyre::Result<Data> {
     let data = bincode::deserialize_from(file)?;
     Ok(data)
 }
+pub async fn run(args:Cli)->eyre::Result<()>{
+    match args.subcmd{
+        cli::SubCommands::List(args) => list(args)?,
+        cli::SubCommands::Download(args) => download(args).await?,
+        cli::SubCommands::Fix(args) => fix(args).await?,
+    }
+    Ok(())
+}
+pub fn list(args:ListArgs)->eyre::Result<()>{
+    let ListArgs { data_path } = args;
+    if let Some(path) = data_path{
+        let data = parse_data(Some(path.as_ref()))?;
+        for (k,v) in data.topisc.iter(){
+            println!("key: {}",k);
+            for url in v{
+                println!("  --url: {}",url);
+            }
+        }
+        Ok(())
+    }else{
+        Err(eyre::eyre!("no data path provided"))
+    }
+}
 
-pub async fn run(args: Cli) -> eyre::Result<()> {
+pub async fn fix(args:FixArgs)->eyre::Result<()>{
+    let FixArgs { cookie_file, data_path } = args;
+    let cookie = parse_cookie_store(cookie_file.as_ref().map(AsRef::as_ref))?;
+    let cookie = Arc::new(CookieStoreRwLock::new(cookie));
+    let data = parse_data(Some(data_path.as_ref()))?;
+    for (keys,values) in data.topisc{
+        // first check if ./data/keys exists
+        let path = Path::new("./data").join(&keys);
+        if !path.exists(){
+            println!("{} not exists, start to download",keys);
+            let mut handles = vec![];
+            let client = reqwest::Client::builder()
+                .cookie_store(true)
+                .cookie_provider(cookie.clone())
+                .build()?;
+            let client = Rc::new(client);
+            let local_set = tokio::task::LocalSet::new();
+            local_set.run_until(async{
+                for url in values{
+                    let client = Rc::clone(&client);
+                    let url = url.clone();
+                    handles.push(tokio::task::spawn_local(async move{
+                        let req = client.get(&url).build()?;
+                        let result = client.execute(req).await?;
+                        let text = result.text().await?;
+                        let html = Html::parse_document(&text);
+                        let selector = Selector::parse("img").unwrap();
+                        let url = Url::parse(&url)?;
+                        let mut srcs = vec![];
+                        for element in html.select(&selector) {
+                            let img_src = get_img_src(element.value());
+                            let img_url = url.join(img_src)?;
+                            srcs.push(img_url.to_string());
+                        }
+                        Ok::<Vec<String>,eyre::Error>(srcs)
+                    }));
+                }
+                let mut srcs = vec![];
+                for handle in handles{
+                    srcs.extend(handle.await??);
+                }
+                Ok::<Vec<String>,eyre::Error>(srcs)
+            }).await?;
+   
+        }
+    }
+    todo!()
+}
+
+pub async fn download(args: DownloadArgs) -> eyre::Result<()> {
+
     if args.url.is_empty() {
         println!("No url provided");
         return Err(eyre::eyre!("No url provided"))?;
