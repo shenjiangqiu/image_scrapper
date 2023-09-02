@@ -1,10 +1,10 @@
 [package]
-edition = "2021"
-name = "image_scrapper"
-version = "0.2.0"
-exclude = ["/data","*.json","*.bin"]
 description = "a tool to scrape images from a website while skip the duplicate ones"
+edition = "2021"
+exclude = ["/data", "*.json", "*.bin"]
 license = "MIT"
+name = "image_scrapper"
+version = "0.3.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -17,5 +17,5 @@ reqwest = {version = "0.11.20", default-features = false, features = ["native-tl
 reqwest_cookie_store = "0.6.0"
 scraper = "0.17.1"
 serde = {version = "1.0.188", features = ["derive"]}
-tokio = {version = "1.32.0", features = ["rt", "test-util", "macros","fs"]}
+tokio = {version = "1.32.0", features = ["rt", "test-util", "macros", "fs"]}
 url = "2.4.1"
