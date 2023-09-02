@@ -36,21 +36,17 @@ pub async fn run(args: Cli) -> eyre::Result<()> {
 }
 pub fn list(args: ListArgs) -> eyre::Result<()> {
     let ListArgs { data_path } = args;
-    if let Some(path) = data_path {
-        let data = parse_data(Some(path.as_ref()))?;
-        for (k, v) in data.topisc.iter() {
-            println!("key: {}", k);
-            for info in v {
-                if let Some(name) = &info.name {
-                    println!("  --name: {}", name);
-                }
-                println!("  --url: {}", info.url);
+    let data = parse_data(Some(data_path.as_ref()))?;
+    for (k, v) in data.topisc.iter() {
+        println!("key: {}", k);
+        for info in v {
+            if let Some(name) = &info.name {
+                println!("  --name: {}", name);
             }
+            println!("  --url: {}", info.url);
         }
-        Ok(())
-    } else {
-        Err(eyre::eyre!("no data path provided"))
     }
+    Ok(())
 }
 
 pub async fn fix(args: FixArgs) -> eyre::Result<()> {
@@ -58,7 +54,8 @@ pub async fn fix(args: FixArgs) -> eyre::Result<()> {
         cookie_file,
         data_path,
     } = args;
-    let cookie = parse_cookie_store(cookie_file.as_ref().map(AsRef::as_ref))?;
+    let cookie = parse_cookie_store(cookie_file.as_ref().map(AsRef::as_ref))
+        .unwrap_or(CookieStore::default());
     let cookie = Arc::new(CookieStoreRwLock::new(cookie));
     let data = parse_data(Some(data_path.as_ref()))?;
     for (keys, values) in data.topisc {

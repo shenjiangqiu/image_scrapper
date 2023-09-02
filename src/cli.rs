@@ -1,14 +1,14 @@
 use std::path::PathBuf;
 
-use clap::{Parser, Args, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 pub struct Cli {
     #[clap(subcommand)]
     pub subcmd: SubCommands,
 }
-#[derive(Debug,Subcommand)]
-pub enum SubCommands{
+#[derive(Debug, Subcommand)]
+pub enum SubCommands {
     /// list all current database
     List(ListArgs),
     /// download from a url, skip it if it's already in database
@@ -16,8 +16,8 @@ pub enum SubCommands{
     /// scan the filesystem, download all missing files from database
     Fix(FixArgs),
 }
-#[derive(Args,Debug)]
-pub struct DownloadArgs{
+#[derive(Args, Debug)]
+pub struct DownloadArgs {
     #[clap(short, long)]
     pub cookie_file: Option<PathBuf>,
     #[clap(short, long)]
@@ -25,14 +25,14 @@ pub struct DownloadArgs{
     pub url: Vec<String>,
 }
 
-#[derive(Args,Debug)]
-pub struct ListArgs{
+#[derive(Args, Debug)]
+pub struct ListArgs {
     #[clap(short, long)]
-    pub data_path: Option<PathBuf>,
+    pub data_path: PathBuf,
 }
 
-#[derive(Args,Debug)]
-pub struct FixArgs{
+#[derive(Args, Debug)]
+pub struct FixArgs {
     #[clap(short, long)]
     pub cookie_file: Option<PathBuf>,
     #[clap(short, long)]
