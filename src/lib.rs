@@ -1,18 +1,14 @@
-use std::{
-    cell::RefCell,
-    fs::File,
-    path::Path,
-    rc::Rc,
-    sync::Arc,
-};
+use std::{cell::RefCell, fs::File, path::Path, rc::Rc, sync::Arc};
 
-use cli::{Cli, DownloadArgs, ListArgs, FixArgs};
+use cli::{Cli, DownloadArgs, FixArgs, ListArgs};
 use data::Data;
 use reqwest::Client;
 use reqwest_cookie_store::{CookieStore, CookieStoreRwLock};
-use scraper::{Html, Selector, node::Element};
+use scraper::{node::Element, Html, Selector};
 use tokio::io::AsyncWriteExt;
 use url::Url;
+
+use crate::data::ImageInfo;
 pub mod cli;
 pub mod data;
 
@@ -30,40 +26,47 @@ fn parse_data(data_path: Option<&Path>) -> eyre::Result<Data> {
     let data = bincode::deserialize_from(file)?;
     Ok(data)
 }
-pub async fn run(args:Cli)->eyre::Result<()>{
-    match args.subcmd{
+pub async fn run(args: Cli) -> eyre::Result<()> {
+    match args.subcmd {
         cli::SubCommands::List(args) => list(args)?,
         cli::SubCommands::Download(args) => download(args).await?,
         cli::SubCommands::Fix(args) => fix(args).await?,
     }
     Ok(())
 }
-pub fn list(args:ListArgs)->eyre::Result<()>{
+pub fn list(args: ListArgs) -> eyre::Result<()> {
     let ListArgs { data_path } = args;
-    if let Some(path) = data_path{
+    if let Some(path) = data_path {
         let data = parse_data(Some(path.as_ref()))?;
-        for (k,v) in data.topisc.iter(){
-            println!("key: {}",k);
-            for url in v{
-                println!("  --url: {}",url);
+        for (k, v) in data.topisc.iter() {
+            println!("key: {}", k);
+            for info in v {
+                if let Some(name) = &info.name {
+                    println!("  --name: {}", name);
+                }
+                println!("  --url: {}", info.url);
             }
         }
         Ok(())
-    }else{
+    } else {
         Err(eyre::eyre!("no data path provided"))
     }
 }
 
-pub async fn fix(args:FixArgs)->eyre::Result<()>{
-    let FixArgs { cookie_file, data_path } = args;
+pub async fn fix(args: FixArgs) -> eyre::Result<()> {
+    let FixArgs {
+        cookie_file,
+        data_path,
+    } = args;
     let cookie = parse_cookie_store(cookie_file.as_ref().map(AsRef::as_ref))?;
     let cookie = Arc::new(CookieStoreRwLock::new(cookie));
     let data = parse_data(Some(data_path.as_ref()))?;
-    for (keys,values) in data.topisc{
+    for (keys, values) in data.topisc {
         // first check if ./data/keys exists
         let path = Path::new("./data").join(&keys);
-        if !path.exists(){
-            println!("{} not exists, start to download",keys);
+        if !path.exists() {
+            println!("{} not exists, start to download", keys);
+            std::fs::create_dir_all(&path)?;
             let mut handles = vec![];
             let client = reqwest::Client::builder()
                 .cookie_store(true)
@@ -71,40 +74,47 @@ pub async fn fix(args:FixArgs)->eyre::Result<()>{
                 .build()?;
             let client = Rc::new(client);
             let local_set = tokio::task::LocalSet::new();
-            local_set.run_until(async{
-                for url in values{
-                    let client = Rc::clone(&client);
-                    let url = url.clone();
-                    handles.push(tokio::task::spawn_local(async move{
-                        let req = client.get(&url).build()?;
-                        let result = client.execute(req).await?;
-                        let text = result.text().await?;
-                        let html = Html::parse_document(&text);
-                        let selector = Selector::parse("img").unwrap();
-                        let url = Url::parse(&url)?;
-                        let mut srcs = vec![];
-                        for element in html.select(&selector) {
-                            let img_src = get_img_src(element.value());
-                            let img_url = url.join(img_src)?;
-                            srcs.push(img_url.to_string());
-                        }
-                        Ok::<Vec<String>,eyre::Error>(srcs)
-                    }));
-                }
-                let mut srcs = vec![];
-                for handle in handles{
-                    srcs.extend(handle.await??);
-                }
-                Ok::<Vec<String>,eyre::Error>(srcs)
-            }).await?;
-   
+            local_set
+                .run_until(async {
+                    for info in values {
+                        // TODO: handle 'static problem, maybe find a scoped async spawn
+                        let path = path.to_owned();
+                        let client = Rc::clone(&client);
+
+                        handles.push(tokio::task::spawn_local(async move {
+                            let file_name = info
+                                .name
+                                .as_deref()
+                                .unwrap_or(info.url.split('/').last().unwrap());
+                            println!("downloading the img {:?}", file_name);
+                            let req = client.get(&info.url).build()?;
+                            let result = client.execute(req).await?;
+                            // save the img
+                            let bytes = result.bytes().await?;
+
+                            let mut file = tokio::io::BufWriter::new(
+                                tokio::fs::File::create(path.join(file_name)).await?,
+                            );
+                            println!("saving the img {:?}", file_name);
+                            file.write_all(&bytes).await?;
+
+                            Ok::<(), eyre::Error>(())
+                        }));
+                    }
+                    for handle in handles {
+                        handle.await??;
+                    }
+                    Ok::<(), eyre::Error>(())
+                })
+                .await?;
+        } else {
+            println!("{} exists, skip", keys);
         }
     }
-    todo!()
+    Ok(())
 }
 
 pub async fn download(args: DownloadArgs) -> eyre::Result<()> {
-
     if args.url.is_empty() {
         println!("No url provided");
         return Err(eyre::eyre!("No url provided"))?;
@@ -164,19 +174,18 @@ pub async fn download(args: DownloadArgs) -> eyre::Result<()> {
     }
     Ok(())
 }
-fn get_img_src(ele:& Element)->&str{
-    
+fn get_img_src(ele: &Element) -> &str {
     let img_src = ele.attr("src").unwrap();
     let img_click = ele.attr("onclick");
     let re = regex::Regex::new(r#"^Previewurl\('(.*)'\)$"#).unwrap();
-    if let Some(click) = img_click{
-        let cap=re.captures(click);
-        if let Some(cap) = cap{
+    if let Some(click) = img_click {
+        let cap = re.captures(click);
+        if let Some(cap) = cap {
             return cap.get(1).unwrap().as_str();
-        }else{
+        } else {
             return img_src;
         }
-    }else{
+    } else {
         return img_src;
     }
 }
@@ -220,14 +229,16 @@ async fn run_single_url(
         let img_name = img_alt.filter(|v| is_image_name(v)).unwrap_or(img_name);
         let img_path = img_path.join(&img_name);
 
-
         // get the img url
         let img_url = url.join(img_src)?;
-        srcs.push(img_url.to_string());
+        srcs.push(ImageInfo {
+            name: Some(img_name.to_string()),
+            url: img_url.to_string(),
+        });
         // get and save the img
         let req = client.get(img_url).build()?;
         let client_c = Rc::clone(&client);
-        handles.push(tokio::task::spawn_local(async move{
+        handles.push(tokio::task::spawn_local(async move {
             println!("downloading the img {:?}", img_path);
             let result = client_c.execute(req).await?;
             let bytes = result.bytes().await?;
