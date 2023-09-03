@@ -1,10 +1,18 @@
-use std::{cell::RefCell, fs::File, path::Path, rc::Rc, sync::Arc};
+use std::{
+    cell::RefCell,
+    fs::{self, File},
+    path::Path,
+    rc::Rc,
+    sync::Arc,
+};
 
-use cli::{Cli, DownloadArgs, FixArgs, ListArgs};
+use chrono::{LocalResult, TimeZone, Utc};
+use cli::{Cli, DownloadArgs, FixArgs, ListArgs, TranslateArgs};
 use data::Data;
 use reqwest::Client;
 use reqwest_cookie_store::{CookieStore, CookieStoreRwLock};
 use scraper::{node::Element, Html, Selector};
+use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use url::Url;
 
@@ -31,6 +39,93 @@ pub async fn run(args: Cli) -> eyre::Result<()> {
         cli::SubCommands::List(args) => list(args)?,
         cli::SubCommands::Download(args) => download(args).await?,
         cli::SubCommands::Fix(args) => fix(args).await?,
+        cli::SubCommands::Translate(args) => translate(args).await?,
+    }
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[allow(non_snake_case)]
+struct ChromeJsonFile {
+    pub domain: String,
+    pub expirationDate: f64,
+    pub hostOnly: bool,
+    pub httpOnly: bool,
+    pub name: String,
+    pub path: String,
+    pub sameSite: Option<String>,
+    pub secure: bool,
+    pub session: bool,
+    pub storeId: Option<String>,
+    pub value: String,
+}
+
+#[derive(Debug, Deserialize,Serialize)]
+struct Cookie {
+    raw_cookie: String,
+    path: Vec<serde_json::Value>,
+    domain: Domain,
+    expires: Expiration,
+}
+
+#[derive(Debug, Deserialize,Serialize)]
+#[allow(non_snake_case)]
+struct Domain {
+    Suffix: String,
+}
+
+#[derive(Debug, Deserialize,Serialize)]
+#[allow(non_snake_case)]
+struct Expiration {
+    AtUtc: String,
+}
+
+pub async fn translate(args: TranslateArgs) -> eyre::Result<()> {
+    let json = match (args.input, args.file) {
+        (None, None) => {
+            eprintln!("No input provided");
+            return Err(eyre::eyre!("No input provided"));
+        }
+        (Some(input), _) => input,
+        (None, Some(file_path)) => {
+            let file = fs::read_to_string(file_path)?;
+            file
+        }
+    };
+    let json: Vec<ChromeJsonFile> = serde_json::from_str(&json)?;
+    // translate the json to my json
+    let cookies = json.into_iter().map(|oc| Cookie {
+        raw_cookie: format!("{}={}", oc.name, oc.value),
+        path: vec![
+            serde_json::Value::String(oc.path),
+            serde_json::Value::Bool(true),
+        ],
+        domain: Domain { Suffix: oc.domain },
+        expires: Expiration {
+            AtUtc: {
+                let expiration_timestamp = oc.expirationDate;
+                let expiration_date = Utc.timestamp_opt(
+                    expiration_timestamp as i64,
+                    (expiration_timestamp.fract() * 1_000_000_000.0) as u32,
+                );
+                let utc = match expiration_date {
+                    LocalResult::Single(i) => {
+                        let expiration_str = i.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                        // eprintln!("Expiration Date: {}", expiration_str);
+                        expiration_str
+                    }
+                    _ => {
+                        eprintln!("fail to parse the date");
+                        panic!("fail to parse the date")
+                    }
+                };
+                utc
+            },
+        },
+    });
+    for c in cookies{
+        let cookie_str = serde_json::to_string(&c)?;
+        println!("{}",cookie_str);
     }
     Ok(())
 }
@@ -142,7 +237,12 @@ pub async fn download(args: DownloadArgs) -> eyre::Result<()> {
                 )));
             }
             for handle in handles {
-                changed |= handle.await??;
+                match handle.await? {
+                    Ok(c) => changed |= c,
+                    Err(error) => {
+                        println!("error: {:?}", error);
+                    }
+                }
             }
             Ok::<(), eyre::Error>(())
         })
@@ -257,4 +357,25 @@ async fn run_single_url(
 fn is_image_name(v: &str) -> bool {
     let re = regex::Regex::new(r#"^.*\.(jpg|png|jpeg)$"#).unwrap();
     re.is_match(v)
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::LocalResult;
+    use chrono::TimeZone;
+    use chrono::Utc;
+    #[test]
+    fn test_chrono() {
+        let expiration_timestamp: f64 = 1723197836.013598;
+
+        // Convert the timestamp to a DateTime<Utc> object
+        let expiration_date = Utc.timestamp_opt(
+            expiration_timestamp as i64,
+            (expiration_timestamp.fract() * 1_000_000_000.0) as u32,
+        );
+        if let LocalResult::Single(i) = expiration_date {
+            let expiration_str = i.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            println!("Expiration Date: {}", expiration_str);
+        }
+    }
 }

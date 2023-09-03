@@ -15,6 +15,8 @@ pub enum SubCommands {
     Download(DownloadArgs),
     /// scan the filesystem, download all missing files from database
     Fix(FixArgs),
+    /// translate the JSON file to my JSON file.
+    Translate(TranslateArgs),
 }
 #[derive(Args, Debug)]
 pub struct DownloadArgs {
@@ -37,4 +39,14 @@ pub struct FixArgs {
     pub cookie_file: Option<PathBuf>,
     #[clap(short, long)]
     pub data_path: PathBuf,
+}
+
+#[derive(Args, Debug)]
+pub struct TranslateArgs {
+    #[clap(short, long)]
+    /// the input json from chrome
+    pub input: Option<String>,
+    #[clap(short, long)]
+    /// the input file of json
+    pub file: Option<PathBuf>,
 }
