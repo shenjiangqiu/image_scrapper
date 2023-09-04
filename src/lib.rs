@@ -83,7 +83,7 @@ struct Expiration {
 pub async fn translate(args: TranslateArgs) -> eyre::Result<()> {
     let json = match (args.input, args.file) {
         (None, None) => {
-            eprintln!("No input provided");
+            eprintln!("No input provided, should either provide --input or --file");
             return Err(eyre::eyre!("No input provided"));
         }
         (Some(input), _) => input,
